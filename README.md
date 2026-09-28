@@ -1,4 +1,4 @@
-# ⛽ Fuel Price Telegram Bot
+# ⛽ Fuel Price Telegram Bot (@fuellvbot)
 
 A Telegram bot that tracks fuel prices in Latvia and shows the cheapest station for each fuel type. It can send you the prices every day at a time you choose.
 
