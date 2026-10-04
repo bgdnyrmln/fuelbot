@@ -4,6 +4,7 @@
 # Runtime data
 cache.json
 subscriptions.json
+preferences.json
 
 # Python
 __pycache__/

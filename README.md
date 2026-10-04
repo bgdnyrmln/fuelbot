@@ -8,6 +8,8 @@ A Telegram bot that tracks fuel prices in Latvia and shows the cheapest station 
 - **Daily updates** at a time of your choice with `/fuelscan`
 - **Multiple providers:** Circle K, Virsi, Neste and Straujupite
 - **Fuel types:** 95, 98, diesel (DD) and diesel+ (DD+), where available
+- **Preferred fuels:** pick only the fuels you care about with `/myfuel`
+- **Cheapest overall:** see the best price for each fuel across all providers
 - **Built-in caching** so the source websites are never spammed
 - **Persistent state:** the cache and daily subscriptions survive restarts
 
@@ -19,6 +21,7 @@ A Telegram bot that tracks fuel prices in Latvia and shows the cheapest station 
 | `/fuel` | Show the latest cached fuel prices |
 | `/fuelscan [HH:MM]` | Get prices every day at the given time (default `08:00`). Without an argument, the bot asks for a time |
 | `/break` | Stop daily updates |
+| `/myfuel` | Choose which fuels appear in `/fuel` and daily messages (tap buttons to toggle) |
 | `/cancel` | Cancel the time prompt |
 | `/help` | List available commands |
 

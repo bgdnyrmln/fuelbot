@@ -8,9 +8,10 @@ from datetime import time as dtime
 from pathlib import Path
 
 from dotenv import load_dotenv
-from telegram import ForceReply, Update
+from telegram import ForceReply, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     ConversationHandler,
@@ -29,6 +30,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 SUBS_FILE = Path(os.getenv("SUBS_FILE", "subscriptions.json"))  # {chat_id: "HH:MM"}
+PREFS_FILE = Path(os.getenv("PREFS_FILE", "preferences.json"))  # {chat_id: ["95", "DD"]}
 DEFAULT_TIME = "08:00"
 ASK_TIME = 0
 
@@ -76,9 +78,43 @@ def parse_time(text: str) -> str | None:
     return f"{int(m[1]):02d}:{m[2]}"
 
 
+# ---------------------------------------------------------------- fuel preferences
+def load_prefs() -> dict[str, list[str]]:
+    try:
+        return json.loads(PREFS_FILE.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except Exception:
+        logger.exception("Could not read preferences")
+        return {}
+
+
+def save_prefs(prefs: dict[str, list[str]]) -> None:
+    PREFS_FILE.write_text(json.dumps(prefs), encoding="utf-8")
+
+
+def get_fuels(chat_id: int) -> list[str]:
+    """Preferred fuels for a chat; empty list means "show all"."""
+    return load_prefs().get(str(chat_id), [])
+
+
+def fuel_keyboard(selected: list[str]) -> InlineKeyboardMarkup:
+    row = [
+        InlineKeyboardButton(f"{'✅' if f in selected else '▫️'} {f}", callback_data=f"fuel:{f}")
+        for f in fuel.ORDER
+    ]
+    return InlineKeyboardMarkup([row, [InlineKeyboardButton("Show all", callback_data="fuel:all")]])
+
+
+def fuel_prompt(selected: list[str]) -> str:
+    shown = ", ".join(selected) if selected else "all fuels"
+    return f"Tap to choose which fuels you care about.\nCurrently showing: {shown}"
+
+
 async def send_daily(context: ContextTypes.DEFAULT_TYPE) -> None:
     await fuel.refresh_if_needed()  # no-op if cache is younger than CACHE_TTL
-    await context.bot.send_message(context.job.chat_id, fuel.format_prices())
+    chat_id = context.job.chat_id
+    await context.bot.send_message(chat_id, fuel.format_prices(get_fuels(chat_id)))
 
 
 # ---------------------------------------------------------------- handlers
@@ -92,6 +128,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/fuel – see the latest prices right now\n"
         "/fuelscan – get prices sent to you every day (default 08:00, or pick your own time, e.g. <code>/fuelscan 07:30</code>)\n"
         "/break – stop daily updates\n"
+        "/myfuel – choose which fuels to show (e.g. only 95 and diesel)\n"
         "/help – show this list again\n\n"
         "💡 Prices are cached for about an hour, so replies are instant and the "
         "fuel sites don't get spammed.\n\n"
@@ -102,7 +139,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text(
         "/fuel - show latest cached fuel prices\n"
         "/fuelscan [HH:MM] - get prices every day at the chosen time (default 08:00)\n"
-        "/break - stop daily updates"
+        "/break - stop daily updates\n"
+        "/myfuel - choose which fuels to show"
     )
 
 
@@ -114,7 +152,35 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def fuel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Reads the cache; only scrapes if a provider's data is older than CACHE_TTL.
     await fuel.refresh_if_needed()
-    await update.message.reply_text(fuel.format_prices())
+    await update.message.reply_text(fuel.format_prices(get_fuels(update.effective_chat.id)))
+
+
+async def myfuel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    selected = get_fuels(update.effective_chat.id)
+    await update.message.reply_text(fuel_prompt(selected), reply_markup=fuel_keyboard(selected))
+
+
+async def fuel_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    choice = query.data.removeprefix("fuel:")
+    chat_id = str(update.effective_chat.id)
+    prefs = load_prefs()
+    selected = prefs.get(chat_id, [])
+    if choice == "all":
+        selected = []
+    elif choice in selected:
+        selected.remove(choice)
+    elif choice in fuel.ORDER:
+        selected.append(choice)
+    selected.sort(key=fuel.ORDER.index)
+    if selected:
+        prefs[chat_id] = selected
+    else:
+        prefs.pop(chat_id, None)
+    save_prefs(prefs)
+    await query.answer()
+    if query.message.text != fuel_prompt(selected):  # editing to identical content raises
+        await query.edit_message_text(fuel_prompt(selected), reply_markup=fuel_keyboard(selected))
 
 
 async def _subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE, hhmm: str) -> None:
@@ -182,6 +248,8 @@ def main() -> None:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("fuel", fuel_command))
     application.add_handler(CommandHandler("break", break_command))
+    application.add_handler(CommandHandler("myfuel", myfuel_command))
+    application.add_handler(CallbackQueryHandler(fuel_choice, pattern=r"^fuel:"))
     application.add_handler(
         ConversationHandler(
             entry_points=[CommandHandler("fuelscan", scan)],

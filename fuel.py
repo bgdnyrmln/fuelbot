@@ -167,8 +167,34 @@ def _fmt(e: dict) -> str:
     return f"{price}, {e['address']}" if e.get("address") else price
 
 
-def format_prices() -> str:
+def _sort_key(f: str) -> int:
+    return ORDER.index(f) if f in ORDER else 99
+
+
+def _best_overall(fuels) -> list[str]:
+    """One line per fuel: the cheapest price across all providers."""
+    lines = []
+    for fuel in sorted(fuels, key=_sort_key):
+        offers = [
+            (e["price"], st["data"]["label"], e)
+            for st in _state.values()
+            if "data" in st
+            for f, e in st["data"]["prices"].items()
+            if f == fuel and e.get("price") is not None
+        ]
+        if offers:
+            _, label, e = min(offers, key=lambda o: o[0])
+            lines.append(f"{fuel}: {label}, {_fmt(e)}")
+    return lines
+
+
+def format_prices(fuels=None) -> str:
+    """fuels: iterable of fuel codes to show (None = all)."""
+    wanted = set(fuels) if fuels else set(ORDER)
     lines = ["⛽ Fuel prices (cheapest station per fuel)"]
+    best = _best_overall(wanted)
+    if best:
+        lines += ["\n🏆 Cheapest overall", *best]
     for name in PROVIDERS:
         st = _state.get(name)
         if not st or "data" not in st:
@@ -178,7 +204,9 @@ def format_prices() -> str:
         when = datetime.fromtimestamp(st["updated"], TZ).strftime("%d.%m %H:%M")
         stale = " ⚠️ outdated, last refresh failed" if st.get("error") else ""
         lines.append(f"\n{data['label']} — {data['source']}, updated {when}{stale}")
-        prices = data["prices"]
-        for fuel in sorted(prices, key=lambda f: ORDER.index(f) if f in ORDER else 99):
+        prices = {f: e for f, e in data["prices"].items() if f in wanted}
+        if not prices:
+            lines.append("none of your selected fuels")
+        for fuel in sorted(prices, key=_sort_key):
             lines.append(f"{fuel}: {_fmt(prices[fuel])}")
     return "\n".join(lines)
